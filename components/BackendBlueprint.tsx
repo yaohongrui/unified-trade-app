@@ -1,10 +1,27 @@
 import React from 'react';
-import { Copy, Terminal } from 'lucide-react';
+import { Copy, Terminal, Shield } from 'lucide-react';
 
 export const BackendBlueprint = () => {
+  const gitIgnoreCode = `
+# .gitignore
+# 这个文件告诉 Git 忽略哪些文件
+# 放在项目根目录下
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.env  <-- 关键！绝对不能传这个
+
+# Node / Frontend
+node_modules/
+dist/
+.DS_Store
+`;
+
   const pythonCode = `
 # main.py
-# 部署在你的 Azure Server 上
+# 部署在你的 Azure Server 上 (backend/main.py)
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import ccxt.async_support as ccxt
@@ -13,17 +30,19 @@ from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv() # 加载 .env 文件中的 API Key
 
 app = FastAPI()
 
-# 允许你的 React 前端访问 (CORS)
+# 允许跨域 (CORS) - 生产环境建议把 allow_origins 改为你的 Vercel 域名
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # 生产环境建议替换为你的前端域名
+    allow_origins=["*"], 
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ... (Get Exchange & OrderRequest Code remains same) ...
 
 # 初始化交易所实例
 def get_exchange(name):
@@ -31,7 +50,7 @@ def get_exchange(name):
         'apiKey': os.getenv(f"{name.upper()}_API_KEY"),
         'secret': os.getenv(f"{name.upper()}_SECRET"),
         'enableRateLimit': True,
-        'options': {'defaultType': 'future'}, # 默认做合约
+        'options': {'defaultType': 'future'},
     }
     if name == 'binance':
         return ccxt.binance(config)
@@ -45,36 +64,35 @@ class OrderRequest(BaseModel):
     amount: float
     price: float = None
     type: str = 'limit'
-    exchanges: list[str] = ['binance', 'bybit'] # 默认全选
+    leverage: int = 20
+    exchanges: list[str] = ['binance', 'bybit']
 
-@app.get("/balance")
-async def get_balance():
-    """获取多交易所余额"""
+@app.get("/positions")
+async def get_positions():
+    """获取多交易所实时持仓"""
     results = {}
-    exchanges = ['binance', 'bybit']
-    
-    async def fetch_balance(exch_name):
+    async def fetch_pos(exch_name):
         exchange = get_exchange(exch_name)
         try:
-            balance = await exchange.fetch_balance()
-            # 简化返回，只返回 USDT
-            return exch_name, balance['total'].get('USDT', 0)
+            positions = await exchange.fetch_positions()
+            # 过滤掉持仓量为 0 的标的
+            active = [p for p in positions if float(p['contracts']) > 0]
+            return exch_name, active
         except Exception as e:
-            return exch_name, 0
+            print(f"Error fetching {exch_name}: {e}")
+            return exch_name, []
         finally:
             await exchange.close()
 
-    tasks = [fetch_balance(ex) for ex in exchanges]
+    tasks = [fetch_pos(name) for name in ['binance', 'bybit']]
     data = await asyncio.gather(*tasks)
-    
-    for name, balance in data:
-        results[name] = balance
-        
+    for name, pos in data:
+        results[name] = pos
     return results
 
 @app.post("/trade")
 async def place_order(order: OrderRequest):
-    """同时下单 (Broadcast)"""
+    """同时下单 (Broadcast) 并自动调整杠杆"""
     results = {}
     
     async def execute(exch_name):
@@ -83,7 +101,13 @@ async def place_order(order: OrderRequest):
         
         exchange = get_exchange(exch_name)
         try:
-            # CCXT 统一 API
+            # 1. 尝试设置杠杆
+            try:
+                await exchange.set_leverage(order.leverage, order.symbol)
+            except Exception as e:
+                print(f"Set leverage failed for {exch_name}: {e}")
+
+            # 2. 下单
             res = await exchange.create_order(
                 symbol=order.symbol,
                 type=order.type,
@@ -104,24 +128,41 @@ async def place_order(order: OrderRequest):
 
 if __name__ == "__main__":
     import uvicorn
+    # 0.0.0.0 代表允许外部访问
     uvicorn.run(app, host="0.0.0.0", port=8000)
 `;
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-white mb-2">Backend Boilerplate</h2>
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+      <div className="mb-4">
+        <h2 className="text-2xl font-bold text-white mb-2">Backend Code & Security</h2>
         <p className="text-slate-400 text-sm">
-          这是你的 Azure 服务器需要的核心逻辑。使用 <code className="text-indigo-400">FastAPI</code> 和 <code className="text-indigo-400">ccxt</code>。
-          它处理了 API 签名、异步请求和跨域问题。
+          这是后端的核心代码。记得要在根目录创建一个 <code className="text-rose-400">.gitignore</code> 文件，防止私钥泄露。
         </p>
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 bg-slate-950 border-b border-slate-800">
+          <div className="flex items-center gap-2 text-rose-400 text-xs font-mono font-bold">
+            <Shield className="w-4 h-4" />
+            .gitignore (MUST HAVE)
+          </div>
+          <button className="text-slate-500 hover:text-white transition-colors">
+            <Copy className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-4">
+          <pre className="text-xs font-mono text-slate-300">
+            {gitIgnoreCode}
+          </pre>
+        </div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden relative group">
         <div className="flex items-center justify-between px-4 py-3 bg-slate-950 border-b border-slate-800">
           <div className="flex items-center gap-2 text-slate-400 text-xs font-mono">
             <Terminal className="w-4 h-4" />
-            main.py
+            backend/main.py
           </div>
           <button className="text-slate-500 hover:text-white transition-colors">
             <Copy className="w-4 h-4" />
@@ -133,10 +174,6 @@ if __name__ == "__main__":
             {pythonCode}
           </pre>
         </div>
-      </div>
-
-      <div className="mt-6 bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl text-sm text-amber-200">
-        <strong>Vibe Coding 提示：</strong> 你可以将这段代码喂给 AI，并要求它："增加一个 /positions 接口来获取当前持仓，并确保 ccxt 配置支持合约交易 (future/swap)"。
       </div>
     </div>
   );

@@ -3,14 +3,10 @@ import {
   ArrowUpRight, 
   ArrowDownRight, 
   RefreshCw, 
-  Wallet, 
-  Activity, 
   Check, 
   Search, 
   Star, 
   X,
-  Settings,
-  Zap,
   ChevronDown,
   TrendingUp
 } from 'lucide-react';
